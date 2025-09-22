@@ -6,7 +6,7 @@ app.use(express.json());
 
 const BOT_ID = process.env.GROUPME_BOT_ID;
 
-// Use Node 18+ global fetch (no extra deps)
+// Send a message back to the GroupMe group as the bot
 async function send(text) {
   await fetch("https://api.groupme.com/v3/bots/post", {
     method: "POST",
@@ -15,48 +15,69 @@ async function send(text) {
   });
 }
 
-// Extract Name + Order Due Date lines from "Customer Information" blocks
+// Parse any message text that includes "Customer Information"
 function parseOrders(raw) {
   if (!raw || !/customer information/i.test(raw)) return [];
+
+  // Split into blocks that start with "Customer Information:"
   const blocks = raw.split(/(?=Customer Information\s*:)/i);
   const results = [];
+
   for (const block of blocks) {
     if (!/Customer Information/i.test(block)) continue;
+
+    // Capture first Name: ... in the block
     const nameMatch = block.match(/^\s*Name\s*:\s*(.+?)\s*$/im);
-    const dueMatch = block.match(/^\s*Order\s+Due\s+Date\s*:\s*([0-9]{1,2}\/([0-9]{1,2}\/([0-9]{4}))\s*$/im);
+
+    // Capture the first Order Due Date: ... (accepts mm/dd/yyyy or yyyy-mm-dd)
+    const dueMatch =
+      block.match(/^\s*Order\s+Due\s+Date\s*:\s*((?:\d{1,2}\/\d{1,2}\/\d{4})|(?:\d{4}-\d{2}-\d{2}))\s*$/im) ||
+      block.match(/^\s*Order\s+due\s+date\s*:\s*((?:\d{1,2}\/\d{1,2}\/\d{4})|(?:\d{4}-\d{2}-\d{2}))\s*$/im);
+
     if (nameMatch && dueMatch) {
-      results.push({ customer: nameMatch[1].trim(), due: dueMatch[1].trim() });
+      results.push({
+        customer: nameMatch[1].trim(),
+        due: dueMatch[1].trim(),
+      });
     }
   }
+
   return results;
 }
 
-app.get("/", (req, res) => res.send("OK")); // simple health check
+// Health check
+app.get("/", (_, res) => res.send("OK"));
 
+// This endpoint is your GroupMe bot "Callback URL"
 app.post("/groupme/webhook", async (req, res) => {
-  res.sendStatus(200); // ack fast
+  // ACK immediately so GroupMe doesn't retry
+  res.sendStatus(200);
 
   const msg = req.body || {};
-  if (msg.sender_type === "bot") return; // avoid loops
+
+  // GroupMe posts include: text, name, sender_type, etc.
+  // Ignore our own bot messages to avoid infinite loops
+  if (msg.sender_type === "bot") return;
 
   const text = msg.text || "";
-  const postedBy = msg.name || "Unknown";
+  const poster = msg.name || "Unknown";
 
-  if (!/customer information/i.test(text)) return;
-
+  // Always run extraction automatically on *every* message
   const entries = parseOrders(text);
-  if (entries.length === 0) {
-    await send(`No orders found in that message, ${postedBy}. Make sure it includes "Customer Information", "Name:", and "Order Due Date:".`);
-    return;
-  }
 
+  // If nothing matched, do nothing (quiet) OR notify—your choice:
+  if (entries.length === 0) return;
+
+  // Build and send CSV rows
   let csv = "Sales Rep,Customer Name,Order Due Date\n";
-  for (const e of entries) csv += `${postedBy},${e.customer},${e.due}\n`;
+  for (const e of entries) csv += `${poster},${e.customer},${e.due}\n`;
 
+  // Keep within GroupMe text limits
   if (csv.length > 900) csv = csv.slice(0, 850) + "\n...[truncated]";
+
   await send(csv);
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Bot listening");
+app.listen(process.env.PORT || 8080, () => {
+  console.log("GroupMe bot is listening for POSTs at /groupme/webhook");
 });
