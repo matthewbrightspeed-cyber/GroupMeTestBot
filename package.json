@@ -1,17 +1,7 @@
 {
-  "name": "groupmetestbot",
+  "name": "groupme-bot",
   "version": "1.0.0",
-  "description": "A Node.js bot for parsing GroupMe order notifications.",
   "type": "module",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "keywords": [
-    "groupme",
-    "bot",
-    "nodejs"
-  ],
-  "author": "Mateo",
-  "license": "ISC"
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node server.js" }
 }
